@@ -6,6 +6,7 @@ import argparse
 from glob import glob
 import os
 import re
+import subprocess
 import sys
 
 from typing import Dict, List, Tuple
@@ -14,8 +15,6 @@ from typing import Dict, List, Tuple
 
 
 print("argv: %s" % (sys.argv[1:]))
-
-
 # Sadly, execBlender can't be defined later on, so it ends up having to
 # sit right in the middle of our imports!
 #
@@ -37,7 +36,7 @@ def execBlender(reason: str):
         "--",
     ] + sys.argv[1:]
 
-    print("executing: %s" % " ".join((blender_args)))
+    print("executing: %s" % (" ".join((blender_args))))
 
     # For some reason, this just doesn't work under Windows if there's a
     # space in the path. Can't manage to feed it anything that will actually
@@ -62,6 +61,33 @@ except ImportError:
 # It imported ok, so now check to see if we have a context object
 if bpy.context is None:
     execBlender("no context available")
+
+# Return the git revision as a string
+def git_version():
+    def _minimal_ext_cmd(cmd, cwd=None):
+        # construct minimal environment
+        env = {}
+        for k in ['SYSTEMROOT', 'PATH']:
+            v = os.environ.get(k)
+            if v is not None:
+                env[k] = v
+        # LANGUAGE is used on win32
+        env['LANGUAGE'] = 'C'
+        env['LANG'] = 'C'
+        env['LC_ALL'] = 'C'
+        out = subprocess.Popen(
+            cmd, cwd=cwd, stdout=subprocess.PIPE, env=env).communicate()[0]
+        return out
+
+    try:
+        out = _minimal_ext_cmd(
+            ['git', 'describe', '--always', '--dirty'], os.path.dirname(__file__))
+        GIT_REVISION = out.strip().decode('ascii')
+    except OSError:
+        GIT_REVISION = "unknown"
+
+    return GIT_REVISION
+
 
 # We have to do the above before trying to import other things,
 # because some other things might not be installed on system
@@ -136,29 +162,19 @@ def scene_prep(args, files):
     links = bpy.data.materials['Preview Material'].node_tree.links
     pbsdf_shader = nodes["Principled BSDF"]
 
-    # filenames = [
-    #     r"pbrtex\red_brick_wall_4_diffuse.png",
-    #     r"pbrtex\red_brick_wall_4_glossiness.png",
-    #     r"pbrtex\red_brick_wall_4_height.png",
-    #     r"pbrtex\red_brick_wall_4_normal.png",
-    #     r"pbrtex\red_brick_wall_4_reflection.png",
-    # ]
-
     filenames = []
     for f in files:
         if '*' in f:
-            filenames += glob(f)
+            filenames.append(glob(f))
         else:
-            filenames += f
+            filenames.append(f)
 
-    # pprint(filenames)
+    print(f"prepping files: {filenames}")
 
     # Remove sockets without files
     sockets = match_files_to_socket_names(filenames)
 
-    # FIXME: don't check for file existing, for testing
-    # sockets = [s for s in sockets if s[2] and os.path.exists(s[2])]
-    sockets = [s for s in sockets if s[2]]
+    sockets = [s for s in sockets if s[2] and os.path.exists(s[2])]
 
     if not sockets:
         print("ERROR: No matching images found")
@@ -209,7 +225,6 @@ def scene_prep(args, files):
         if not pbsdf_shader.inputs[sname[0]].is_linked:
             # No texture node connected -> add texture node with new image
             texture_node = nodes.new(type='ShaderNodeTexImage')
-            # img = bpy.data.images.load(path.join(import_path, sname[2]))
             img = bpy.data.images.load(os.path.realpath(sname[2]))
 
             texture_node.image = img
@@ -246,7 +261,7 @@ def scene_prep(args, files):
                     set(fname_components))
 
                 if match_rough:
-                    # If Roughness nothing to to
+                    # If Roughness nothing to do
                     link = links.new(
                         pbsdf_shader.inputs[sname[0]], texture_node.outputs[0])
 
@@ -306,6 +321,7 @@ def scene_prep(args, files):
         for texture_node in texture_nodes:
             link = links.new(texture_node.inputs[0], reroute.outputs[0])
         link = links.new(reroute.inputs[0], mapping.outputs[0])
+    # Can use this if we'd rather not have a reroute node
     # if len(texture_nodes) > 1:
     #     for texture_node in texture_nodes:
     #         link = links.new(texture_node.inputs[0], mapping.outputs[0])
@@ -343,14 +359,6 @@ def scene_prep(args, files):
 output_re = re.compile("(.*).(png|jpg|jpeg)", re.IGNORECASE)
 
 def render(args, outfile):
-    # output_file = os.path.join(os.path.realpath("."), f"{basename}.png")
-    # render.set_output_properties(scene=scene, resolution_percentage=100,
-    #                              output_file_path=output_file)
-
-    # num_samples = 16
-    # render.set_cycles_renderer(scene, camera,
-    #                            num_samples, use_denoising=False)
-
     scene = bpy.context.scene
     scene.render.engine = 'CYCLES'
     scene.render.resolution_percentage = 100
@@ -385,11 +393,8 @@ def readable_file(f: str) -> str:
     return f
 
 
-def main(argv):
-    input_name = ""
-    # print("fbxregroup version: %s" % (git_version()))
-
-    print(argv)
+def main(argv: List[str]) -> int:
+    print("fbxregroup version: %s" % (git_version()))
 
     # When we get called from blender, the entire blender command line is
     # passed to us as argv. Arguments for us specifically are separated
@@ -454,15 +459,24 @@ def main(argv):
     global _debug
     _debug = args.debug
 
+    print(f"files: {args.files}")
+
     if not scene_prep(args, args.files):
         print("ERROR: Scene prep failed")
     else:
         render(args, args.out)
 
-    # bpy.ops.wm.save_mainfile(filepath="test.blend")
-    bpy.ops.wm.quit_blender()
-    sys.exit(0)  # Shouldn't be reached
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    ret = main(sys.argv)
+
+    if ret != 0:
+        # FIXME: How *do* we want to handle failures?
+        print(f"WARNING: texrender exited with return code {ret}")
+
+    bpy.ops.wm.quit_blender()
+
+    # Should never be reached
+    sys.exit(0)
