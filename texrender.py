@@ -110,6 +110,7 @@ tags = {
 def split_into__components(fname):
     # Split filename into components
     # 'WallTexture_diff_2k.002.jpg' -> ['Wall', 'Texture', 'diff', 'k']
+    #
     # Remove extension
     fname = os.path.splitext(fname)[0]
     # Remove digits
@@ -165,7 +166,7 @@ def scene_prep(args, files):
     filenames = []
     for f in files:
         if '*' in f:
-            filenames.append(glob(f))
+            filenames += glob(f)
         else:
             filenames.append(f)
 
@@ -180,7 +181,7 @@ def scene_prep(args, files):
         print("ERROR: No matching images found")
         return False
 
-    pbsdf_shader.inputs["Specular"].default_value = 0.0
+    pbsdf_shader.inputs["Specular"].default_value = 0.5
 
     print("Matched textures:")
     texture_nodes = []
@@ -382,8 +383,11 @@ def render(args, outfile):
     if args.keep_blend:
         bpy.ops.wm.save_mainfile(filepath=basename + ".blend")
 
-    bpy.ops.render.render(
-        animation=False, write_still=True, use_viewport=False)
+    if args.no_render:
+        print("WARNING: Not rendering preview image due to --no-render")
+    else:
+        bpy.ops.render.render(
+            animation=False, write_still=True, use_viewport=False)
 
 
 def readable_file(f: str) -> str:
@@ -447,6 +451,14 @@ def main(argv: List[str]) -> int:
     )
 
     parser.add_argument(
+        "-n",
+        "--no-render",
+        default=False,
+        action='store_true',
+        help="prep blend, but don't rendder (implies --keep-blend)",
+    )
+
+    parser.add_argument(
         "files",
         help="specify files to process",
         metavar="file",
@@ -459,12 +471,16 @@ def main(argv: List[str]) -> int:
     global _debug
     _debug = args.debug
 
-    print(f"files: {args.files}")
+    # print(f"files: {args.files}")
+
+    if args.no_render:
+        args.keep_blend = True
 
     if not scene_prep(args, args.files):
         print("ERROR: Scene prep failed")
-    else:
-        render(args, args.out)
+        return 1
+
+    render(args, args.out)
 
     return 0
 
