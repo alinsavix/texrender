@@ -1,0 +1,1 @@
+"c:\Program Files\Blender Foundation\blender-current\blender.exe"  --background --factory-startup --python "%~dp0texrender.py" -- %*
