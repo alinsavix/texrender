@@ -233,7 +233,7 @@ def scene_prep(args, files):
             link = links.new(disp_node.inputs[0], disp_texture.outputs[0])
 
             # could be 'DISPLACEMENT', 'BUMP' or 'BOTH'
-            # FIXME: add subdivision
+            # FIXME: add subdivision?
             bpy.data.materials['Preview Material'].cycles.displacement_method = 'BOTH'
 
             # Find output node
@@ -386,8 +386,9 @@ def render(args, outfile):
     scene.render.engine = 'CYCLES'
     scene.render.resolution_percentage = 100
     scene.render.filepath = os.path.realpath(outfile)
-    # scene.view_layers[0].cycles.use_denoising = True
-    scene.cycles.samples = 16
+    scene.cycles.denoiser = 'OPENIMAGEDENOISE'
+    scene.cycles.use_denoising = args.denoise
+    scene.cycles.samples = args.samples
 
     m = output_re.match(outfile)
     basename = m.group(1)
@@ -400,6 +401,11 @@ def render(args, outfile):
     else:
         print(f"ERROR: unknown file extension for {os.path.basename(outfile)}")
         return
+
+    print(
+        f"INFO: output to render with size={scene.render.resolution_percentage}%,"
+        f" denoising={args.denoise}, samples={args.samples}"
+    )
 
     # FIXME: Should this be in main or somewhere else that's not here?
     if args.keep_blend:
@@ -417,6 +423,11 @@ def readable_file(f: str) -> str:
         raise argparse.ArgumentError(f"'{f}' is not a readable file")
 
     return f
+
+
+class NegateAction(argparse.Action):
+    def __call__(self, parser, ns, values, option):
+        setattr(ns, self.dest, option[2:4] != 'no')
 
 
 def main(argv: List[str]) -> int:
@@ -494,8 +505,24 @@ def main(argv: List[str]) -> int:
         "--specular-ior",
         default=None,
         type=float,
-        help="calculate specular value to be assigned to material from material IoR"
+        help="calculate specular value to be assigned to material from material IoR",
+    )
 
+    parser.add_argument(
+        "-sa",
+        "--samples",
+        default=16,
+        type=int,
+        help="number of samples to use when rendering",
+    )
+
+    parser.add_argument(
+        "--denoise",
+        "--no-denoise",
+        dest="denoise",
+        default=True,
+        action=NegateAction,
+        nargs=0,
     )
 
     parser.add_argument(
