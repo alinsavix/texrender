@@ -94,17 +94,6 @@ def git_version():
 # python
 from mathutils import Vector
 
-tags = {
-    "color": "diffuse diff albedo base col color".split(),
-    "sss_color": "sss subsurface".split(),
-    "metallic": "metallic metalness metal mtl".split(),
-    "specular": "specularity specular spec spc".split(),
-    "normal": "normal nor nrm nrml norm".split(),
-    "bump": "bump bmp".split(),
-    "rough": "roughness rough rgh".split(),
-    "gloss": "gloss glossy glossiness".split(),
-    "displacement": "displacement displace disp dsp height heightmap".split(),
-}
 
 # split our texture filenames up into components
 def split_into__components(fname):
@@ -127,29 +116,46 @@ def split_into__components(fname):
     return components
 
 
+# filename segments for different types of map
+tags = {
+    "color": "diffuse diff albedo base col color".split(),
+    "sss_color": "sss subsurface".split(),
+    "metallic": "metallic metalness metal mtl".split(),
+    "specular": "specularity specular spec spc".split(),
+    "normal": "normal nor nrm nrml norm".split(),
+    "bump": "bump bmp".split(),
+    "rough": "roughness rough rgh".split(),
+    "gloss": "gloss glossy glossiness".split(),
+    "displacement": "displacement displace disp dsp height heightmap".split(),
+}
+
 # Look through texture_types and set value as filename of first matched file
 def match_files_to_socket_names(filenames):
-    socketnames = [
-        ['Displacement', tags["displacement"], None],
-        ['Base Color', tags["color"], None],
-        ['Subsurface Color', tags["sss_color"], None],
-        ['Metallic', tags["metallic"], None],
-        ['Specular', tags["specular"], None],
-        ['Roughness', tags["rough"] + tags["gloss"], None],
-        ['Normal', tags["normal"] + tags["bump"], None],
-    ]
+    # FIXME: reflection map ignored (for PBR ... might be needed for non-PBR)
+    sockets = {
+        'Displacement': [tags["displacement"], None],
+        'Base Color': [tags["color"], None],
+        'Subsurface Color': [tags["sss_color"], None],
+        'Metallic': [tags["metallic"], None],
+        'Specular': [tags["specular"], None],
+        'Roughness': [tags["rough"] + tags["gloss"], None],
+        'Normal': [tags["normal"] + tags["bump"], None],
+    }
 
-    for sname in socketnames:
+    for _, sdata in sockets.items():
         for fname in filenames:
             filenamecomponents = split_into__components(fname)
-            matches = set(sname[1]).intersection(
-                set(filenamecomponents))
+            matches = set(sdata[0]).intersection(set(filenamecomponents))
             # TODO: ignore basename (if texture is named "fancy_metal_nor", it
             # will be detected as metallic map, not normal map)
             if matches:
-                sname[2] = fname
+                sdata[1] = fname
                 break
-    return socketnames
+    return sockets
+
+
+def spec_from_ior(ior: float) -> float:
+    return (((ior - 1) / (ior + 1)) ** 2) / 0.08
 
 
 # set thing up with material ... stolen pretty much directly from node
@@ -161,7 +167,7 @@ def scene_prep(args, files):
 
     nodes = bpy.data.materials['Preview Material'].node_tree.nodes
     links = bpy.data.materials['Preview Material'].node_tree.links
-    pbsdf_shader = nodes["Principled BSDF"]
+    pbsdf_shader = nodes['Principled BSDF']
 
     filenames = []
     for f in files:
@@ -173,15 +179,31 @@ def scene_prep(args, files):
     print(f"prepping files: {filenames}")
 
     # Remove sockets without files
-    sockets = match_files_to_socket_names(filenames)
+    s = match_files_to_socket_names(filenames)
 
-    sockets = [s for s in sockets if s[2] and os.path.exists(s[2])]
+    sockets = {}
+    for k in s.keys():
+        if s[k][1] and os.path.exists(s[k][1]):
+            sockets[k] = s[k]
 
-    if not sockets:
+    # sockets = [s for s in sockets if s[2] and os.path.exists(s[2])]
+
+    if len(sockets) == 0:
         print("ERROR: No matching images found")
         return False
 
-    pbsdf_shader.inputs["Specular"].default_value = 0.5
+    # specular/specular IoR
+    if "Specular" in sockets:
+        if args.specular or args.specular_ior:
+            print(
+                f"WARNING: specular value or IoR value specified while using specular map")
+    elif args.specular_ior:
+        pbsdf_shader.inputs["Specular"].default_value = spec_from_ior(
+            args.specular_ior)
+    elif args.specular:
+        pbsdf_shader.inputs["Specular"].default_value = args.specular
+    else:
+        pbsdf_shader.inputs["Specular"].default_value = 0.5
 
     print("Matched textures:")
     texture_nodes = []
@@ -189,15 +211,16 @@ def scene_prep(args, files):
     normal_node = None
     roughness_node = None
 
-    for i, sname in enumerate(sockets):
-        print(i, sname[0], sname[2])
+    for sname, sdata in sockets.items():
+        # for i, sname in enumerate(sockets):
+        print(sname, sdata[1])
 
         # DISPLACEMENT NODES
-        if sname[0] == 'Displacement':
+        if sname == 'Displacement':
             disp_texture = nodes.new(type='ShaderNodeTexImage')
             # img = bpy.data.images.load(path.join(import_path, sname[2]))
             # img = bpy.data.images.load(os.path.join(os.getcwd(), sname[2]))
-            img = bpy.data.images.load(os.path.realpath(sname[2]))
+            img = bpy.data.images.load(os.path.realpath(sdata[1]))
             disp_texture.image = img
             disp_texture.label = 'Displacement'
             if disp_texture.image:
@@ -223,17 +246,17 @@ def scene_prep(args, files):
 
             continue
 
-        if not pbsdf_shader.inputs[sname[0]].is_linked:
+        if not pbsdf_shader.inputs[sname].is_linked:
             # No texture node connected -> add texture node with new image
             texture_node = nodes.new(type='ShaderNodeTexImage')
-            img = bpy.data.images.load(os.path.realpath(sname[2]))
+            img = bpy.data.images.load(os.path.realpath(sdata[1]))
 
             texture_node.image = img
 
             # NORMAL NODES
-            if sname[0] == 'Normal':
+            if sname == 'Normal':
                 # Test if new texture node is normal or bump map
-                fname_components = split_into__components(sname[2])
+                fname_components = split_into__components(sdata[1])
                 match_normal = set(tags["normal"]).intersection(
                     set(fname_components))
                 match_bump = set(tags["bump"]).intersection(
@@ -250,12 +273,12 @@ def scene_prep(args, files):
                         normal_node.inputs[2], texture_node.outputs[0])
 
                 link = links.new(
-                    pbsdf_shader.inputs[sname[0]], normal_node.outputs[0])
+                    pbsdf_shader.inputs[sname], normal_node.outputs[0])
                 normal_node_texture = texture_node
 
-            elif sname[0] == 'Roughness':
+            elif sname == 'Roughness':
                 # Test if glossy or roughness map
-                fname_components = split_into__components(sname[2])
+                fname_components = split_into__components(sdata[1])
                 match_rough = set(tags["rough"]).intersection(
                     set(fname_components))
                 match_gloss = set(tags["gloss"]).intersection(
@@ -264,7 +287,7 @@ def scene_prep(args, files):
                 if match_rough:
                     # If Roughness nothing to do
                     link = links.new(
-                        pbsdf_shader.inputs[sname[0]], texture_node.outputs[0])
+                        pbsdf_shader.inputs[sname], texture_node.outputs[0])
 
                 elif match_gloss:
                     # If Gloss Map add invert node
@@ -273,25 +296,24 @@ def scene_prep(args, files):
                         invert_node.inputs[1], texture_node.outputs[0])
 
                     link = links.new(
-                        pbsdf_shader.inputs[sname[0]], invert_node.outputs[0])
+                        pbsdf_shader.inputs[sname], invert_node.outputs[0])
                     roughness_node = texture_node
-
             else:
                 # This is a simple connection Texture --> Input slot
                 link = links.new(
-                    pbsdf_shader.inputs[sname[0]], texture_node.outputs[0])
+                    pbsdf_shader.inputs[sname], texture_node.outputs[0])
 
             # Use non-color for all but 'Base Color' Textures
-            if not sname[0] in ['Base Color'] and texture_node.image:
+            if not sname in ['Base Color'] and texture_node.image:
                 texture_node.image.colorspace_settings.is_data = True
 
         else:
             # If already texture connected. add to node list for alignment
-            texture_node = pbsdf_shader.inputs[sname[0]].links[0].from_node
+            texture_node = pbsdf_shader.inputs[sname].links[0].from_node
 
         # This are all connected texture nodes
         texture_nodes.append(texture_node)
-        texture_node.label = sname[0]
+        texture_node.label = sname
 
     if disp_texture:
         texture_nodes.append(disp_texture)
@@ -357,7 +379,7 @@ def scene_prep(args, files):
     return True
 
 
-output_re = re.compile("(.*).(png|jpg|jpeg)", re.IGNORECASE)
+output_re = re.compile(r"(.*)\.([^.]+)", re.IGNORECASE)
 
 def render(args, outfile):
     scene = bpy.context.scene
@@ -365,7 +387,7 @@ def render(args, outfile):
     scene.render.resolution_percentage = 100
     scene.render.filepath = os.path.realpath(outfile)
     # scene.view_layers[0].cycles.use_denoising = True
-    scene.cycles.samples = 128
+    scene.cycles.samples = 16
 
     m = output_re.match(outfile)
     basename = m.group(1)
@@ -456,6 +478,24 @@ def main(argv: List[str]) -> int:
         default=False,
         action='store_true',
         help="prep blend, but don't rendder (implies --keep-blend)",
+    )
+
+    # FIXME: Make these next two mutually exclusive
+    parser.add_argument(
+        "-sp",
+        "--specular",
+        default=None,
+        type=float,
+        help="flat specular value to be assigned to material (generally 0.00 - 0.08)",
+    )
+
+    parser.add_argument(
+        "-si",
+        "--specular-ior",
+        default=None,
+        type=float,
+        help="calculate specular value to be assigned to material from material IoR"
+
     )
 
     parser.add_argument(
