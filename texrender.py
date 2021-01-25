@@ -431,7 +431,7 @@ class NegateAction(argparse.Action):
 
 
 def main(argv: List[str]) -> int:
-    print("fbxregroup version: %s" % (git_version()))
+    print("texrender version: %s" % (git_version()))
 
     # When we get called from blender, the entire blender command line is
     # passed to us as argv. Arguments for us specifically are separated
