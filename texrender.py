@@ -424,6 +424,25 @@ def readable_file(f: str) -> str:
 
     return f
 
+# class SceneFileAction(argparse.Action):
+#     def __call__(self, parser, ns, values, option):
+#         setattr(ns, self.dest, option)
+
+# Find the scene file. First, check the texrender scene directory for a
+# filename that matches a plain scene name. Otherwise, assume a filename
+# and check a couple of places for it.
+def scene_file(f: str) -> str:
+    if f.endswith(".blend"):
+        return readable_file(f)
+
+    # Not a blend file, so see if its in our scene directory
+    mydir = os.path.realpath(os.path.dirname(__file__))
+    scenepath = os.path.join(mydir, "scenes", f"texrender_scene_{f}.blend")
+    if not os.path.isfile(scenepath):
+        raise argparse.ArgumentError(f"scene name '{f}' is not valid")
+
+    return scenepath
+
 
 class NegateAction(argparse.Action):
     def __call__(self, parser, ns, values, option):
@@ -455,15 +474,12 @@ def main(argv: List[str]) -> int:
 
     parser.add_argument("--debug", "-d", action="count", default=0)
 
-    mydir = os.path.realpath(os.path.dirname(__file__))
-    default_scene_file = os.path.join(mydir, "scenes", "texrender_scene.blend")
-
     parser.add_argument(
         "-s",
         "--scene",
         help="blender scene file to use for rendering",
-        type=readable_file,
-        default=default_scene_file,
+        type=scene_file,
+        default="knob",
     )
 
     parser.add_argument(
@@ -538,8 +554,9 @@ def main(argv: List[str]) -> int:
     global _debug
     _debug = args.debug
 
-    # print(f"files: {args.files}")
-
+    # Theoretically you could specify --no-render and then not specify
+    # --keep-blend, but at that point there's not really a point, so
+    # go ahead and assume --keep-blend
     if args.no_render:
         args.keep_blend = True
 
@@ -557,7 +574,7 @@ if __name__ == "__main__":
 
     if ret != 0:
         # FIXME: How *do* we want to handle failures?
-        print(f"WARNING: texrender exited with return code {ret}")
+        print(f"WARNING: texrender exiting with return code {ret}")
 
     bpy.ops.wm.quit_blender()
 
