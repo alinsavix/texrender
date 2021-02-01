@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# call via `blender --background --factory-startup --python thisfile.py -- -m <file>.fbx
+# call via `blender --background --factory-startup --python thisfile.py -- --option --option <files>
 #
 
 import argparse
@@ -498,7 +498,7 @@ def main(argv: List[str]) -> int:
         "--scene",
         help="blender scene file to use for rendering",
         type=scene_file,
-        default="knob",
+        default="sphere",
     )
 
     parser.add_argument(
