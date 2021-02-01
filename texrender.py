@@ -118,7 +118,7 @@ def split_into__components(fname):
 
 # filename segments for different types of map
 tags = {
-    "color": "diffuse diff albedo base col color".split(),
+    "color": "diffuse diff albedo base col color basecolor".split(),
     "sss_color": "sss subsurface".split(),
     "metallic": "metallic metalness metal mtl".split(),
     "specular": "specularity specular spec spc".split(),
@@ -142,16 +142,22 @@ def match_files_to_socket_names(filenames):
         'Normal': [tags["normal"] + tags["bump"], None],
     }
 
+    matchednames = []
     for _, sdata in sockets.items():
         for fname in filenames:
             filenamecomponents = split_into__components(fname)
+            # print(f"components: {filenamecomponents}")
             matches = set(sdata[0]).intersection(set(filenamecomponents))
             # TODO: ignore basename (if texture is named "fancy_metal_nor", it
             # will be detected as metallic map, not normal map)
             if matches:
+                matchednames.append(fname)
                 sdata[1] = fname
                 break
-    return sockets
+
+    unmatched = list(set(filenames) - set(matchednames))
+
+    return (sockets, unmatched)
 
 
 def spec_from_ior(ior: float) -> float:
@@ -176,27 +182,36 @@ def scene_prep(args, files):
         else:
             filenames.append(f)
 
-    print(f"prepping files: {filenames}")
+    s, uf = match_files_to_socket_names(filenames)
 
     # Remove sockets without files
-    s = match_files_to_socket_names(filenames)
-
+    unused = []
     sockets = {}
     for k in s.keys():
         if s[k][1] and os.path.exists(s[k][1]):
             sockets[k] = s[k]
-
-    # sockets = [s for s in sockets if s[2] and os.path.exists(s[2])]
+        else:
+            unused.append(k)
 
     if len(sockets) == 0:
         print("ERROR: No matching images found")
         return False
 
+    # FIXME: Maybe report this after rendering, instead?
+    print("\nMatched maps:")
+    for sname, sdata in s.items():
+        print(f"  {sname:17} {sdata[1]}")
+
+    if len(uf) > 0:
+        print("\nUnused/unmatched files:")
+        for u in uf:
+            print(f"  {u}")
+
     # specular/specular IoR
     if "Specular" in sockets:
         if args.specular or args.specular_ior:
             print(
-                f"WARNING: specular value or IoR value specified while using specular map")
+                f"\nWARNING: specular value or IoR value specified while using specular map")
     elif args.specular_ior:
         pbsdf_shader.inputs["Specular"].default_value = spec_from_ior(
             args.specular_ior)
@@ -205,15 +220,14 @@ def scene_prep(args, files):
     else:
         pbsdf_shader.inputs["Specular"].default_value = 0.5
 
-    print("Matched textures:")
+    print(f"\n")
+
     texture_nodes = []
     disp_texture = None
     normal_node = None
     roughness_node = None
 
     for sname, sdata in sockets.items():
-        # for i, sname in enumerate(sockets):
-        print(sname, sdata[1])
 
         # DISPLACEMENT NODES
         if sname == 'Displacement':
