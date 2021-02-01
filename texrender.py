@@ -223,13 +223,13 @@ def scene_prep(args, files):
     print(f"\n")
 
     texture_nodes = []
-    disp_texture = None
+    disp_node = None
     normal_node = None
     roughness_node = None
 
     for sname, sdata in sockets.items():
-
         # DISPLACEMENT NODES
+        # FIXME: This was separate in node wrangler, not sure why
         if sname == 'Displacement':
             disp_texture = nodes.new(type='ShaderNodeTexImage')
             # img = bpy.data.images.load(path.join(import_path, sname[2]))
@@ -242,12 +242,11 @@ def scene_prep(args, files):
 
             # Add displacement offset nodes
             disp_node = nodes.new(type='ShaderNodeDisplacement')
-            disp_node.inputs["Scale"].default_value = 0.15
-            disp_node.location = pbsdf_shader.location + Vector((0, -710))
+            disp_node.inputs["Scale"].default_value = args.height_scale
+            disp_node.location = disp_texture.location + Vector((300, 0))
             link = links.new(disp_node.inputs[0], disp_texture.outputs[0])
 
             # could be 'DISPLACEMENT', 'BUMP' or 'BOTH'
-            # FIXME: add subdivision?
             bpy.data.materials['Preview Material'].cycles.displacement_method = 'BOTH'
 
             # Find output node
@@ -258,8 +257,10 @@ def scene_prep(args, files):
                     link = links.new(
                         output_node[0].inputs[2], disp_node.outputs[0])
 
+            texture_nodes.append(disp_texture)
             continue
 
+        # EVERYTHING ELSE
         if not pbsdf_shader.inputs[sname].is_linked:
             # No texture node connected -> add texture node with new image
             texture_node = nodes.new(type='ShaderNodeTexImage')
@@ -329,7 +330,8 @@ def scene_prep(args, files):
         texture_nodes.append(texture_node)
         texture_node.label = sname
 
-    if disp_texture:
+    # We do this here, rather than way up there, so this will be last
+    if disp_node:
         texture_nodes.append(disp_texture)
 
     # Alignment
@@ -344,6 +346,9 @@ def scene_prep(args, files):
     if roughness_node:
         # Alignment of invert node if glossy map
         invert_node.location = roughness_node.location + Vector((300, 0))
+
+    if disp_node:
+        disp_node.location = disp_texture.location + Vector((300, 0))
 
     # Add texture input + mapping
     mapping = nodes.new(type='ShaderNodeMapping')
@@ -505,22 +510,6 @@ def main(argv: List[str]) -> int:
         help="file to output material preview to",
     )
 
-    parser.add_argument(
-        "-k",
-        "--keep-blend",
-        default=False,
-        action='store_true',
-        help="save a copy of the generated .blend file",
-    )
-
-    parser.add_argument(
-        "-n",
-        "--no-render",
-        default=False,
-        action='store_true',
-        help="prep blend, but don't rendder (implies --keep-blend)",
-    )
-
     # FIXME: Make these next two mutually exclusive
     parser.add_argument(
         "-sp",
@@ -539,6 +528,14 @@ def main(argv: List[str]) -> int:
     )
 
     parser.add_argument(
+        "--height-scale",
+        "--height",
+        default=0.15,
+        type=float,
+        help="Scale to use for height (displacement) maps",
+    )
+
+    parser.add_argument(
         "-sa",
         "--samples",
         default=16,
@@ -553,6 +550,22 @@ def main(argv: List[str]) -> int:
         default=True,
         action=NegateAction,
         nargs=0,
+    )
+
+    parser.add_argument(
+        "-k",
+        "--keep-blend",
+        default=False,
+        action='store_true',
+        help="save a copy of the generated .blend file",
+    )
+
+    parser.add_argument(
+        "-n",
+        "--no-render",
+        default=False,
+        action='store_true',
+        help="prep blend, but don't rendder (implies --keep-blend)",
     )
 
     parser.add_argument(
