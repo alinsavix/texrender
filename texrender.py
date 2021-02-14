@@ -210,9 +210,12 @@ def scene_prep(args, files):
     # specular/specular IoR
     if "Specular" in sockets:
         if args.specular or args.specular_ior:
+            # FIXME: Do we ever want to use specular maps?
+            # see https://blenderartists.org/t/the-poorly-understood-specular-slider-of-the-principled-shader/1150941
             print(
                 f"\nWARNING: specular value or IoR value specified while using specular map")
     elif args.specular_ior:
+        # FIXME: Does this need to be scaled properly?
         pbsdf_shader.inputs["Specular"].default_value = spec_from_ior(
             args.specular_ior)
     elif args.specular:
@@ -433,6 +436,8 @@ def render(args, outfile):
     if args.no_render:
         print("WARNING: Not rendering preview image due to --no-render")
     else:
+        # FIXME: benchmark/validate the automatic tile size bit
+        bpy.ops.preferences.addon_enable(module="render_auto_tile_size")
         bpy.ops.render.render(
             animation=False, write_still=True, use_viewport=False)
 
