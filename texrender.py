@@ -404,13 +404,33 @@ def scene_prep(args, files):
 output_re = re.compile(r"(.*)\.([^.]+)", re.IGNORECASE)
 
 def render(args, outfile):
+    bpy.context.preferences.addons["cycles"].preferences.compute_device_type = 'CUDA'
+
     scene = bpy.context.scene
     scene.render.engine = 'CYCLES'
-    scene.render.resolution_percentage = 100
+    scene.cycles.feature_set = 'SUPPORTED'
+    scene.render.resolution_percentage = args.scale
     scene.render.filepath = os.path.realpath(outfile)
-    scene.cycles.denoiser = 'OPENIMAGEDENOISE'
     scene.cycles.use_denoising = args.denoise
+    scene.cycles.denoiser = 'OPENIMAGEDENOISE'
+    # scene.cycles.denoiser = 'OPTIX'
     scene.cycles.samples = args.samples
+    scene.cycles.use_progressive_refine = False
+
+    scene.cycles.tile_order = 'CENTER'
+
+    # Really, these scenes are simple enough that GPU vs. CPU, and one tile
+    # size vs another probably doesn't matter. But lets set 'em anyhow.
+    if args.cpu:
+        scene.cycles.device = 'CPU'
+        scene.render.tile_x = 32
+        scene.render.tile_y = 32
+    else:
+        scene.cycles.device = 'GPU'
+        scene.render.tile_x = 256
+        scene.render.tile_y = 256
+
+    # print(f"tile x: {scene.render.tile_x}   y: {scene.render.tile_y}")
 
     m = output_re.match(outfile)
     basename = m.group(1)
@@ -499,6 +519,15 @@ def main(argv: List[str]) -> int:
     parser.add_argument("--debug", "-d", action="count", default=0)
 
     parser.add_argument(
+        "-o",
+        "--out",
+        type=str,
+        default="preview.png",
+
+        help="file to output material preview to",
+    )
+
+    parser.add_argument(
         "-s",
         "--scene",
         help="blender scene file to use for rendering",
@@ -507,12 +536,18 @@ def main(argv: List[str]) -> int:
     )
 
     parser.add_argument(
-        "-o",
-        "--out",
-        type=str,
-        default="preview.png",
+        "-sc",
+        "--scale",
+        help="scale scene by x%",
+        type=int,
+        default=100,
+    )
 
-        help="file to output material preview to",
+    parser.add_argument(
+        "--cpu",
+        help="render with CPU instead of GPU",
+        default=False,
+        action='store_true',
     )
 
     # FIXME: Make these next two mutually exclusive
