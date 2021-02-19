@@ -96,7 +96,7 @@ from mathutils import Vector
 
 
 # split our texture filenames up into components
-def split_into__components(fname):
+def split_into_components(fname):
     # Split filename into components
     # 'WallTexture_diff_2k.002.jpg' -> ['Wall', 'Texture', 'diff', 'k']
     #
@@ -145,7 +145,7 @@ def match_files_to_socket_names(filenames):
     matchednames = []
     for _, sdata in sockets.items():
         for fname in filenames:
-            filenamecomponents = split_into__components(fname)
+            filenamecomponents = split_into_components(fname)
             # print(f"components: {filenamecomponents}")
             matches = set(sdata[0]).intersection(set(filenamecomponents))
             # TODO: ignore basename (if texture is named "fancy_metal_nor", it
@@ -168,13 +168,6 @@ def spec_from_ior(ior: float) -> float:
 # wrangler, because node wrangler itself made too many assumptions about
 # the state of things, and I got tired of fighting with it
 def scene_prep(args, files):
-    bpy.ops.wm.open_mainfile(
-        filepath=args.scene, load_ui=False, use_scripts=False)
-
-    nodes = bpy.data.materials['Preview Material'].node_tree.nodes
-    links = bpy.data.materials['Preview Material'].node_tree.links
-    pbsdf_shader = nodes['Principled BSDF']
-
     filenames = []
     for f in files:
         if '*' in f:
@@ -206,6 +199,16 @@ def scene_prep(args, files):
         print("\nUnused/unmatched files:")
         for u in uf:
             print(f"  {u}")
+
+    if args.analyze:
+        return True
+
+    bpy.ops.wm.open_mainfile(
+        filepath=args.scene, load_ui=False, use_scripts=False)
+
+    nodes = bpy.data.materials['Preview Material'].node_tree.nodes
+    links = bpy.data.materials['Preview Material'].node_tree.links
+    pbsdf_shader = nodes['Principled BSDF']
 
     # specular/specular IoR
     if "Specular" in sockets:
@@ -274,7 +277,7 @@ def scene_prep(args, files):
             # NORMAL NODES
             if sname == 'Normal':
                 # Test if new texture node is normal or bump map
-                fname_components = split_into__components(sdata[1])
+                fname_components = split_into_components(sdata[1])
                 match_normal = set(tags["normal"]).intersection(
                     set(fname_components))
                 match_bump = set(tags["bump"]).intersection(
@@ -296,7 +299,7 @@ def scene_prep(args, files):
 
             elif sname == 'Roughness':
                 # Test if glossy or roughness map
-                fname_components = split_into__components(sdata[1])
+                fname_components = split_into_components(sdata[1])
                 match_rough = set(tags["rough"]).intersection(
                     set(fname_components))
                 match_gloss = set(tags["gloss"]).intersection(
@@ -593,6 +596,13 @@ def main(argv: List[str]) -> int:
     )
 
     parser.add_argument(
+        "--analyze",
+        default=False,
+        action='store_true',
+        help="show what maps would be used (no rendering)",
+    )
+
+    parser.add_argument(
         "-k",
         "--keep-blend",
         default=False,
@@ -630,6 +640,9 @@ def main(argv: List[str]) -> int:
     if not scene_prep(args, args.files):
         print("ERROR: Scene prep failed")
         return 1
+
+    if args.analyze:
+        return 0
 
     render(args, args.out)
 
