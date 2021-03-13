@@ -541,7 +541,7 @@ def main(argv: List[str]) -> int:
     parser.add_argument(
         "-sc",
         "--scale",
-        help="scale scene by x%",
+        help="scale scene by x%%",
         type=int,
         default=100,
     )
