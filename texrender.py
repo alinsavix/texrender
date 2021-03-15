@@ -233,6 +233,8 @@ def scene_prep(args, files):
     normal_node = None
     roughness_node = None
 
+    # FIXME: We'd probably be better off loading a node tree and editing
+    # it, rather than creating it from scratch.
     for sname, sdata in sockets.items():
         # DISPLACEMENT NODES
         # FIXME: This was separate in node wrangler, not sure why
@@ -404,7 +406,7 @@ def scene_prep(args, files):
     return True
 
 
-output_re = re.compile(r"(.*)\.([^.]+)", re.IGNORECASE)
+output_re = re.compile(r"^(.*)\.([^.]+)", re.IGNORECASE)
 
 def render(args, outfile):
     bpy.context.preferences.addons["cycles"].preferences.compute_device_type = 'CUDA'
@@ -435,7 +437,7 @@ def render(args, outfile):
 
     # print(f"tile x: {scene.render.tile_x}   y: {scene.render.tile_y}")
 
-    m = output_re.match(outfile)
+    m = output_re.search(outfile)
     basename = m.group(1)
     filetype = str(m.group(2))
 
@@ -491,27 +493,45 @@ def scene_file(f: str) -> str:
     return scenepath
 
 
+# graphic_re = re.compile(r"\.(exr|hdri?|jpe?g|png|tga|tiff?)$", re.IGNORECASE)
+graphic_re = re.compile(r"\.png$", re.IGNORECASE)
+
+# This edits 'args' in place, rather than returning something. Kind
+# of (very) ugly.
+def dirmode_prep(args):
+    if len(args.files) != 1:
+        print("ERROR: Directory mode requires exactly one input directory")
+        sys.exit(1)
+
+    d = args.files[0]
+    if not os.path.isdir(d):
+        print(f"ERROR: {d} does not exist, or is not a directory")
+        sys.exit(1)
+
+    # iterate the directory, only go one layer deep, and snag only files
+    input_files = []
+    files = os.listdir(d)
+    for f in files:
+        m = graphic_re.search(f)
+        if not m:
+            continue
+
+        input_files.append(os.path.join(d, f))
+
+    if len(input_files) == 0:
+        print(f"ERROR: No graphics files found in {d}")
+        sys.exit(1)
+
+    args.files = input_files
+    return
+
+
 class NegateAction(argparse.Action):
     def __call__(self, parser, ns, values, option):
         setattr(ns, self.dest, option[2:4] != 'no')
 
 
-def main(argv: List[str]) -> int:
-    print("texrender version: %s" % (git_version()))
-
-    # When we get called from blender, the entire blender command line is
-    # passed to us as argv. Arguments for us specifically are separated
-    # with a double dash, which makes blender stop processing arguments.
-    # If there's not a double dash in argv, it means we can't possibly
-    # have any arguments, in which case, we should blow up.
-    if (("--" in argv) == False):
-        print("Usage: blender --background --python thisfile.py -- <file>.fbx")
-        return 1
-
-    # chop argv down to just our arguments
-    args_start = argv.index("--") + 1
-    argv = argv[args_start:]
-
+def parse_arguments(argv):
     parser = argparse.ArgumentParser(
         # FIXME: We need to specify this, because we have no meaningful
         # argv[0], but we probably shouldn't just hardcode it
@@ -519,13 +539,14 @@ def main(argv: List[str]) -> int:
         description='Render a preview of a (PBR) texture',
     )
 
-    parser.add_argument("--debug", "-d", action="count", default=0)
+    parser.add_argument("--debug", action="count", default=0)
 
     parser.add_argument(
         "-o",
         "--out",
         type=str,
-        default="preview.png",
+        # default="preview.png",
+        default=None,
 
         help="file to output material preview to",
     )
@@ -596,6 +617,14 @@ def main(argv: List[str]) -> int:
     )
 
     parser.add_argument(
+        "-d",
+        "--directory",
+        default=False,
+        action='store_true',
+        help="directory mode",
+    )
+
+    parser.add_argument(
         "--analyze",
         default=False,
         action='store_true',
@@ -626,10 +655,48 @@ def main(argv: List[str]) -> int:
         nargs="+",
     )
 
-    args = parser.parse_args(argv)
+    parsed_args = parser.parse_args(argv)
+
+    # FIXME: This should probably be elsewhere? Especially if
+    # we're going to support multiple input directories for
+    # directory mode
+    if parsed_args.out is None:
+        if parsed_args.directory:
+            d = os.path.dirname(parsed_args.files[0])
+            parsed_args.out = f"{d}.png"
+        else:
+            parsed_args.out = "preview.png"
+
+    return parsed_args
+
+
+def main(argv: List[str]) -> int:
+    print("texrender version: %s" % (git_version()))
+
+    # When we get called from blender, the entire blender command line is
+    # passed to us as argv. Arguments for us specifically are separated
+    # with a double dash, which makes blender stop processing arguments.
+    # If there's not a double dash in argv, it means we can't possibly
+    # have any arguments, in which case, we should blow up.
+    if (("--" in argv) == False):
+        print("Usage: blender --background --python thisfile.py -- <file>.fbx")
+        return 1
+
+    # chop argv down to just our arguments
+    args_start = argv.index("--") + 1
+    argv = argv[args_start:]
+
+    args = parse_arguments(argv)
 
     global _debug
     _debug = args.debug
+
+    # directory mode
+    # FIXME: Can we split this out somehow?
+    if args.directory:
+        # RIght now, only accept a single positional argument
+        # FIXME: Accept more than one directory!
+        dirmode_prep(args)
 
     # Theoretically you could specify --no-render and then not specify
     # --keep-blend, but at that point there's not really a point, so
